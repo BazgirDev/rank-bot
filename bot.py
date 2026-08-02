@@ -23,6 +23,7 @@ from telegram.ext import (
 from search import (
     find_rank,
     gpa_to_taraz,
+    gpa_to_taraz_range,
     percent_to_taraz,
     calc_weighted_gpa,
     format_rank_result,
@@ -207,6 +208,12 @@ field_keyboard = ReplyKeyboardMarkup(
     one_time_keyboard=True,
 )
 
+gpa_field_keyboard = ReplyKeyboardMarkup(
+    [[KeyboardButton("🧬 تجربی"), KeyboardButton("📐 ریاضی"), KeyboardButton("📚 انسانی")]],
+    resize_keyboard=True,
+    one_time_keyboard=True,
+)
+
 region_keyboard = ReplyKeyboardMarkup(
     [
         [
@@ -379,7 +386,7 @@ async def rank_tools_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "📈 *تخمین تراز معدل امتحان نهایی*\n\nرشته خودت را انتخاب کن:",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=field_keyboard,
+            reply_markup=gpa_field_keyboard,
         )
         return GPA_FIELD
 
@@ -484,8 +491,10 @@ async def gpa_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["field"] = "tajrobi"
     elif "ریاضی" in text:
         context.user_data["field"] = "riazi"
+    elif "انسانی" in text:
+        context.user_data["field"] = "ensani"
     else:
-        await update.message.reply_text("لطفاً یکی از دکمه‌ها را انتخاب کن.", reply_markup=field_keyboard)
+        await update.message.reply_text("لطفاً یکی از دکمه‌ها را انتخاب کن.", reply_markup=gpa_field_keyboard)
         return GPA_FIELD
 
     await typing(update, context)
@@ -510,6 +519,12 @@ async def gpa_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "📚 تک‌درس (با ضریب)":
         field = context.user_data["field"]
+        if field == "ensani":
+            await update.message.reply_text(
+                "فعلاً ضرایب تک‌درس رشته انسانی ثبت نشده است؛ «معدل کل» را انتخاب کن.",
+                reply_markup=gpa_mode_keyboard,
+            )
+            return GPA_MODE
         subjects = GPA_COEF[field]
         context.user_data["gpa_scores"] = {}
         context.user_data["gpa_index"] = 0
@@ -540,8 +555,14 @@ async def gpa_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ معدل معتبر وارد کن (۱۰ تا ۲۰).")
         return GPA_TOTAL
 
-    taraz = gpa_to_taraz(gpa)
-    field_name = "تجربی" if context.user_data["field"] == "tajrobi" else "ریاضی"
+    field = context.user_data["field"]
+    taraz_range = gpa_to_taraz_range(gpa, field)
+    if taraz_range is None:
+        await update.message.reply_text("⚠️ داده تخمین برای معدل‌های ۱۵ تا ۲۰ تعریف شده است.")
+        return GPA_TOTAL
+    low, high = taraz_range
+    taraz_text = str(low) if low == high else f"{low} تا {high}"
+    field_name = {"tajrobi": "تجربی", "riazi": "ریاضی", "ensani": "انسانی"}[field]
 
     result = (
         f"📈 *نتیجه تخمین تراز از معدل*\n\n"
@@ -549,7 +570,7 @@ async def gpa_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎓 رشته: *{field_name}*\n"
         f"📊 معدل: *{gpa}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🏆 تراز تخمینی:\n*{taraz}*\n\n"
+        f"🏆 بازه تراز تخمینی:\n*{taraz_text}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
         f"💡 این تب فقط تراز می‌دهد و رتبه محاسبه نمی‌شود."
     )
@@ -588,7 +609,12 @@ async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("خطا در محاسبه معدل وزنی.", reply_markup=main_keyboard)
         return MAIN_MENU
 
-    taraz = gpa_to_taraz(weighted)
+    taraz_range = gpa_to_taraz_range(weighted, context.user_data["field"])
+    if taraz_range is None:
+        await update.message.reply_text("⚠️ داده تخمین برای معدل‌های ۱۵ تا ۲۰ تعریف شده است.", reply_markup=main_keyboard)
+        return MAIN_MENU
+    low, high = taraz_range
+    taraz_text = str(low) if low == high else f"{low} تا {high}"
     field_name = "تجربی" if context.user_data["field"] == "tajrobi" else "ریاضی"
 
     result = (
@@ -597,7 +623,7 @@ async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎓 رشته: *{field_name}*\n"
         f"📊 معدل وزنی: *{weighted:.2f}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🏆 تراز تخمینی:\n*{taraz}*\n\n"
+        f"🏆 بازه تراز تخمینی:\n*{taraz_text}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
         f"💡 این تب فقط تراز می‌دهد و رتبه محاسبه نمی‌شود."
     )
@@ -699,7 +725,10 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     field = context.user_data["field"]
     region = context.user_data["region"]
 
-    gpa_taraz = gpa_to_taraz(gpa)
+    gpa_taraz = gpa_to_taraz(gpa, field)
+    if gpa_taraz is None:
+        await update.message.reply_text("⚠️ داده تخمین برای معدل‌های ۱۵ تا ۲۰ تعریف شده است.", reply_markup=main_keyboard)
+        return MAIN_MENU
     pct_taraz = percent_to_taraz(avg_pct)
     final_taraz = min(10700, round(gpa_taraz * 0.6 + pct_taraz * 0.4))
     rank = find_rank(field, region, final_taraz)
