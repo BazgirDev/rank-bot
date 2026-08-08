@@ -63,6 +63,26 @@ PCT_SUBJECTS = {
     "riazi": [{"id": "riaziat", "name": "ریاضیات"}, {"id": "shimi", "name": "شیمی"}, {"id": "physic", "name": "فیزیک"}],
 }
 
+# داده‌برداری از تخمین رتبه ماز برای کنکور ۱۴۰۴ (biomaze.ir/rank-estimate).
+# در هر ردیف درصد همه دروس تخصصی برابر مقدار ستون اول بوده و مقدار تراز،
+# میانگین ابتدا و انتهای بازه «تراز تخمینی آزمون اختصاصی» ماز است.
+PERCENT_TARAZ_DATA_1404 = {
+    "tajrobi": [
+        (0, 3712), (5, 4855), (10, 5773), (15, 6512), (20, 7113),
+        (25, 7615), (30, 8048), (35, 8442), (40, 8818), (45, 9197),
+        (50, 9591), (55, 10011), (60, 10459), (65, 10936), (70, 11438),
+        (75, 11953), (80, 12470), (85, 12967), (90, 13422), (95, 13807),
+        (100, 14087),
+    ],
+    "riazi": [
+        (0, 4489), (5, 5477), (10, 6328), (15, 7056), (20, 7675),
+        (25, 8202), (30, 8650), (35, 9035), (40, 9371), (45, 9674),
+        (50, 9958), (55, 10239), (60, 10531), (65, 10850), (70, 11209),
+        (75, 11625), (80, 12112), (85, 12685), (90, 13358), (95, 14148),
+        (100, 14200),
+    ],
+}
+
 EXAM_RANGES = {
     "maz": {"name": "ماز", "min": 7000, "max": 13000, "levels": [(12000, 13001, "عالی 🔥 (رتبه زیر ۵۰۰ محتمل)"), (11000, 12000, "خیلی خوب ⭐ (رتبه حدود ۵۰۰–۱۵۰۰)"), (10000, 11000, "خوب (رتبه حدود ۱۵۰۰–۴۰۰۰)"), (9000, 10000, "متوسط رو به بالا"), (8000, 9000, "متوسط"), (7000, 8000, "ضعیف رو به متوسط")]},
     "ghalamchi": {"name": "قلمچی", "min": 4000, "max": 8500, "levels": [(7800, 8501, "عالی 🔥"), (7200, 7800, "خیلی خوب ⭐"), (6500, 7200, "خوب"), (5800, 6500, "متوسط رو به بالا"), (5000, 5800, "متوسط"), (4000, 5000, "ضعیف")]},
@@ -99,8 +119,21 @@ def gpa_to_taraz(gpa: float, field: str | None = None) -> int | None:
     return round(sum(result) / 2) if result else None
 
 
-def percent_to_taraz(avg_percent: float) -> int:
-    return min(10700, round(5000 + (avg_percent / 100) * 5700))
+def percent_to_taraz(avg_percent: float, field: str = "tajrobi") -> int | None:
+    """تبدیل میانگین درصد به تراز کنکور ۱۴۰۴ با درون‌یابی داده‌های ماز."""
+    data = PERCENT_TARAZ_DATA_1404.get(field)
+    if data is None or not 0 <= avg_percent <= 100:
+        return None
+
+    for i, (percent1, taraz1) in enumerate(data):
+        if abs(avg_percent - percent1) < 1e-9:
+            return taraz1
+        if i + 1 < len(data):
+            percent2, taraz2 = data[i + 1]
+            if percent1 < avg_percent < percent2:
+                ratio = (avg_percent - percent1) / (percent2 - percent1)
+                return round(taraz1 + ratio * (taraz2 - taraz1))
+    return None
 
 
 def calc_weighted_gpa(scores: dict, field: str) -> float | None:
