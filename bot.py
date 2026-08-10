@@ -459,7 +459,7 @@ async def rank_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["region"] = region_map[text]
     await typing(update, context)
     await update.message.reply_text(
-        "📈 حالا *تراز کل* خودت را وارد کن:\n\nمثال: `8750`",
+        "📈 حالا *تراز کل* خودت را وارد کن (از زیر ۵۰۰۰ تا ۱۱۰۰۰):\n\nمثال: `4750` یا `8750`",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -468,8 +468,8 @@ async def rank_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def rank_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
     score = parse_number(update.message.text)
-    if score is None or score < 5000 or score > 13000:
-        await update.message.reply_text("⚠️ تراز معتبر وارد کن (حدود ۵۰۰۰ تا ۱۳۰۰۰).")
+    if score is None or score < 0 or score > 11000:
+        await update.message.reply_text("⚠️ تراز معتبر وارد کن (از زیر ۵۰۰۰ تا حداکثر ۱۱۰۰۰).")
         return RANK_SCORE
 
     field = context.user_data["field"]
