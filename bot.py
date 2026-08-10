@@ -30,7 +30,6 @@ from search import (
     get_status,
     GPA_COEF,
     PCT_SUBJECTS,
-    estimate_kanoon_rank,
     evaluate_exam_taraz,
 )
 
@@ -210,7 +209,7 @@ rank_field_keyboard = ReplyKeyboardMarkup(
 )
 
 field_keyboard = ReplyKeyboardMarkup(
-    [[KeyboardButton("📐 ریاضی")]],
+    [[KeyboardButton("🧬 تجربی"), KeyboardButton("📐 ریاضی")]],
     resize_keyboard=True,
     one_time_keyboard=True,
 )
@@ -565,7 +564,7 @@ async def gpa_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
     field = context.user_data["field"]
     taraz_range = gpa_to_taraz_range(gpa, field)
     if taraz_range is None:
-        await update.message.reply_text("⚠️ داده تخمین برای معدل‌های ۱۵ تا ۲۰ تعریف شده است.")
+        await update.message.reply_text("⚠️ داده تخمین برای معدل‌های ۱۰ تا ۲۰ تعریف شده است.")
         return GPA_TOTAL
     low, high = taraz_range
     taraz_text = str(low) if low == high else f"{low} تا {high}"
@@ -618,7 +617,7 @@ async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     taraz_range = gpa_to_taraz_range(weighted, context.user_data["field"])
     if taraz_range is None:
-        await update.message.reply_text("⚠️ داده تخمین برای معدل‌های ۱۵ تا ۲۰ تعریف شده است.", reply_markup=main_keyboard)
+        await update.message.reply_text("⚠️ داده تخمین برای معدل‌های ۱۰ تا ۲۰ تعریف شده است.", reply_markup=main_keyboard)
         return MAIN_MENU
     low, high = taraz_range
     taraz_text = str(low) if low == high else f"{low} تا {high}"
@@ -646,7 +645,9 @@ async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 async def pct_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if "ریاضی" in text:
+    if "تجربی" in text:
+        context.user_data["field"] = "tajrobi"
+    elif "ریاضی" in text:
         context.user_data["field"] = "riazi"
     else:
         await update.message.reply_text("لطفاً یکی از دکمه‌ها را انتخاب کن.", reply_markup=field_keyboard)
@@ -673,7 +674,7 @@ async def pct_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["region"] = region_map[text]
     await typing(update, context)
     await update.message.reply_text(
-        "معدل نهایی (دیپلم) خودت را وارد کن (۸ تا ۲۰):\n\nمثال: `18.20`",
+        "معدل نهایی (دیپلم) خودت را وارد کن (۱۰ تا ۲۰):\n\nمثال: `18.20`",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -682,8 +683,8 @@ async def pct_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pct_gpa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gpa = parse_number(update.message.text)
-    if gpa is None or gpa < 8 or gpa > 20:
-        await update.message.reply_text("⚠️ معدل معتبر وارد کن (۸ تا ۲۰).")
+    if gpa is None or gpa < 10 or gpa > 20:
+        await update.message.reply_text("⚠️ معدل معتبر وارد کن (۱۰ تا ۲۰).")
         return PCT_GPA
 
     context.user_data["gpa"] = gpa
@@ -730,13 +731,16 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     field = context.user_data["field"]
     region = context.user_data["region"]
 
-    estimate = estimate_kanoon_rank(field, region, gpa, avg_pct)
-    if estimate is None:
-        await update.message.reply_text("⚠️ ورودی خارج از دامنه داده‌های کانون است.", reply_markup=main_keyboard)
+    gpa_taraz_range = gpa_to_taraz_range(gpa, field)
+    pct_taraz = percent_to_taraz(avg_pct, field)
+    if gpa_taraz_range is None or pct_taraz is None:
+        await update.message.reply_text("⚠️ ورودی خارج از دامنه داده‌های مرجع است.", reply_markup=main_keyboard)
         return MAIN_MENU
-    rank, performance_index = estimate
+    gpa_taraz = round(sum(gpa_taraz_range) / 2)
+    final_taraz = round(gpa_taraz * 0.6 + pct_taraz * 0.4)
+    rank = find_rank(field, region, final_taraz)
 
-    field_name = {"tajrobi": "تجربی", "riazi": "ریاضی", "ensani": "انسانی"}[field]
+    field_name = {"tajrobi": "تجربی", "riazi": "ریاضی"}[field]
     status = get_status(rank) if rank else "—"
     rank_text = rank if rank else "خارج از بازه"
 
@@ -748,12 +752,14 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"📊 معدل: *{gpa}*\n"
         f"🧪 میانگین درصد: *{avg_pct:.1f}%*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"شاخص عملکرد کانون (۶۰٪ معدل + ۴۰٪ درصد): *{performance_index:.1f}*\n\n"
+        f"تراز معدل: *{gpa_taraz}* (بازه {gpa_taraz_range[0]} تا {gpa_taraz_range[1]})\n"
+        f"تراز درصد: *{pct_taraz}*\n"
+        f"تراز کل (۶۰٪ معدل + ۴۰٪ درصد): *{final_taraz}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🏆 تخمین رتبه:\n*{rank_text}*\n\n"
         f"📈 وضعیت: *{status}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💡 منبع داده: تخمین رتبه کانون، کنکور تیر ۱۴۰۳."
+        f"💡 نتیجه فقط از جدول‌های داده‌شده محاسبه شده است."
     )
 
     await typing(update, context)
