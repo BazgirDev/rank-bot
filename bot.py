@@ -210,7 +210,7 @@ rank_field_keyboard = ReplyKeyboardMarkup(
 )
 
 field_keyboard = ReplyKeyboardMarkup(
-    [[KeyboardButton("🧬 تجربی"), KeyboardButton("📐 ریاضی"), KeyboardButton("📚 انسانی")]],
+    [[KeyboardButton("📐 ریاضی")]],
     resize_keyboard=True,
     one_time_keyboard=True,
 )
@@ -646,12 +646,8 @@ async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 async def pct_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if "تجربی" in text:
-        context.user_data["field"] = "tajrobi"
-    elif "ریاضی" in text:
+    if "ریاضی" in text:
         context.user_data["field"] = "riazi"
-    elif "انسانی" in text:
-        context.user_data["field"] = "ensani"
     else:
         await update.message.reply_text("لطفاً یکی از دکمه‌ها را انتخاب کن.", reply_markup=field_keyboard)
         return PCT_FIELD
