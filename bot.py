@@ -30,6 +30,7 @@ from search import (
     get_status,
     GPA_COEF,
     PCT_SUBJECTS,
+    estimate_kanoon_rank,
     evaluate_exam_taraz,
 )
 
@@ -61,8 +62,8 @@ logger = logging.getLogger(__name__)
 
 # ==================== MEDIA FILES ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RANKS_IMAGE = os.path.join(BASE_DIR, "assets", "ranks.jpg")
-PANSION_IMAGE = os.path.join(BASE_DIR, "assets", "pansion.jpg")
+RANKS_IMAGE = os.path.join(BASE_DIR, "assets", "rank")
+PANSION_IMAGE = os.path.join(BASE_DIR, "assets", "pans")
 TEACHERS_IMAGE_1 = os.path.join(BASE_DIR, "assets", "teachers_1.jpg")
 TEACHERS_IMAGE_2 = os.path.join(BASE_DIR, "assets", "teachers_2.jpg")
 PLAN_IMAGE = os.path.join(BASE_DIR, "assets", "plan_4plus3.jpg")
@@ -202,8 +203,14 @@ rank_tools_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-field_keyboard = ReplyKeyboardMarkup(
+rank_field_keyboard = ReplyKeyboardMarkup(
     [[KeyboardButton("🧬 تجربی"), KeyboardButton("📐 ریاضی")]],
+    resize_keyboard=True,
+    one_time_keyboard=True,
+)
+
+field_keyboard = ReplyKeyboardMarkup(
+    [[KeyboardButton("🧬 تجربی"), KeyboardButton("📐 ریاضی"), KeyboardButton("📚 انسانی")]],
     resize_keyboard=True,
     one_time_keyboard=True,
 )
@@ -377,7 +384,7 @@ async def rank_tools_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "📊 *تخمین رتبه کنکور با تراز کل*\n\nابتدا رشته خودت را انتخاب کن:",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=field_keyboard,
+            reply_markup=rank_field_keyboard,
         )
         return RANK_FIELD
 
@@ -429,7 +436,7 @@ async def rank_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "ریاضی" in text:
         context.user_data["field"] = "riazi"
     else:
-        await update.message.reply_text("لطفاً یکی از دکمه‌ها را انتخاب کن.", reply_markup=field_keyboard)
+        await update.message.reply_text("لطفاً یکی از دکمه‌ها را انتخاب کن.", reply_markup=rank_field_keyboard)
         return RANK_FIELD
 
     await typing(update, context)
@@ -643,6 +650,8 @@ async def pct_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["field"] = "tajrobi"
     elif "ریاضی" in text:
         context.user_data["field"] = "riazi"
+    elif "انسانی" in text:
+        context.user_data["field"] = "ensani"
     else:
         await update.message.reply_text("لطفاً یکی از دکمه‌ها را انتخاب کن.", reply_markup=field_keyboard)
         return PCT_FIELD
@@ -668,7 +677,7 @@ async def pct_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["region"] = region_map[text]
     await typing(update, context)
     await update.message.reply_text(
-        "معدل نهایی (دیپلم) خودت را وارد کن:\n\nمثال: `18.20`",
+        "معدل نهایی (دیپلم) خودت را وارد کن (۸ تا ۲۰):\n\nمثال: `18.20`",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -677,8 +686,8 @@ async def pct_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pct_gpa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gpa = parse_number(update.message.text)
-    if gpa is None or gpa < 10 or gpa > 20:
-        await update.message.reply_text("⚠️ معدل معتبر وارد کن (۱۰ تا ۲۰).")
+    if gpa is None or gpa < 8 or gpa > 20:
+        await update.message.reply_text("⚠️ معدل معتبر وارد کن (۸ تا ۲۰).")
         return PCT_GPA
 
     context.user_data["gpa"] = gpa
@@ -691,7 +700,7 @@ async def pct_gpa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     first = subjects[0]
     await typing(update, context)
     await update.message.reply_text(
-        f"درصد درس *{first['name']}* را وارد کن (۰ تا ۱۰۰):\n\nمثال: `55`",
+        f"درصد درس *{first['name']}* را وارد کن (۳۳- تا ۱۰۰):\n\nمثال: `55`",
         parse_mode=ParseMode.MARKDOWN,
     )
     return PCT_SUBJECTS_INPUT
@@ -699,8 +708,8 @@ async def pct_gpa(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pct = parse_number(update.message.text)
-    if pct is None or pct < 0 or pct > 100:
-        await update.message.reply_text("⚠️ درصد معتبر وارد کن (۰ تا ۱۰۰).")
+    if pct is None or pct < -33 or pct > 100:
+        await update.message.reply_text("⚠️ درصد معتبر وارد کن (۳۳- تا ۱۰۰).")
         return PCT_SUBJECTS_INPUT
 
     subjects = context.user_data["pct_subjects"]
@@ -714,7 +723,7 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if idx < len(subjects):
         next_subj = subjects[idx]
         await update.message.reply_text(
-            f"درصد درس *{next_subj['name']}* را وارد کن (۰ تا ۱۰۰):",
+            f"درصد درس *{next_subj['name']}* را وارد کن (۳۳- تا ۱۰۰):",
             parse_mode=ParseMode.MARKDOWN,
         )
         return PCT_SUBJECTS_INPUT
@@ -725,15 +734,13 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     field = context.user_data["field"]
     region = context.user_data["region"]
 
-    gpa_taraz = gpa_to_taraz(gpa, field)
-    if gpa_taraz is None:
-        await update.message.reply_text("⚠️ داده تخمین برای معدل‌های ۱۵ تا ۲۰ تعریف شده است.", reply_markup=main_keyboard)
+    estimate = estimate_kanoon_rank(field, region, gpa, avg_pct)
+    if estimate is None:
+        await update.message.reply_text("⚠️ ورودی خارج از دامنه داده‌های کانون است.", reply_markup=main_keyboard)
         return MAIN_MENU
-    pct_taraz = percent_to_taraz(avg_pct)
-    final_taraz = min(10700, round(gpa_taraz * 0.6 + pct_taraz * 0.4))
-    rank = find_rank(field, region, final_taraz)
+    rank, performance_index = estimate
 
-    field_name = "تجربی" if field == "tajrobi" else "ریاضی"
+    field_name = {"tajrobi": "تجربی", "riazi": "ریاضی", "ensani": "انسانی"}[field]
     status = get_status(rank) if rank else "—"
     rank_text = rank if rank else "خارج از بازه"
 
@@ -745,14 +752,12 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"📊 معدل: *{gpa}*\n"
         f"🧪 میانگین درصد: *{avg_pct:.1f}%*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"تراز معدل: `{gpa_taraz}`\n"
-        f"تراز درصد: `{pct_taraz}`\n"
-        f"تراز نهایی (۶۰٪ + ۴۰٪): *{final_taraz}*\n\n"
+        f"شاخص عملکرد کانون (۶۰٪ معدل + ۴۰٪ درصد): *{performance_index:.1f}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🏆 تخمین رتبه:\n*{rank_text}*\n\n"
         f"📈 وضعیت: *{status}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💡 این تخمین تقریبی است."
+        f"💡 منبع داده: تخمین رتبه کانون، کنکور تیر ۱۴۰۳."
     )
 
     await typing(update, context)
