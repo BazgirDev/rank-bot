@@ -43,23 +43,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==================== STATES ====================
 (
     MAIN_MENU,
-    # Rank by Taraz
     RANK_FIELD, RANK_REGION, RANK_SCORE,
-    # GPA → Taraz
     GPA_FIELD, GPA_MODE, GPA_TOTAL, GPA_SINGLE,
-    # Percent + GPA
     PCT_FIELD, PCT_REGION, PCT_GPA, PCT_SUBJECTS_INPUT,
-    # آزمون آزمایشی
     EXAM_TYPE, EXAM_TARAZ,
-    # زیرمنوها
     RANK_MENU, ACADEMY_MENU, SCHOOL_MENU,
 ) = range(17)
 
 
-# ==================== MEDIA FILES ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RANKS_IMAGE = os.path.join(BASE_DIR, "assets", "rank")
 PANSION_IMAGE = os.path.join(BASE_DIR, "assets", "pans")
@@ -68,7 +61,6 @@ TEACHERS_IMAGE_2 = os.path.join(BASE_DIR, "assets", "teachers_2.jpg")
 PLAN_IMAGE = os.path.join(BASE_DIR, "assets", "plan_4plus3.jpg")
 
 
-# ==================== EDITABLE TEXTS ====================
 RANKS_TEXT = (
     "🏆 *رتبه‌های برتر آکادمی الف*\n\n"
     "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -180,7 +172,6 @@ CONTACT_TEXT = (
 )
 
 
-# ==================== KEYBOARDS ====================
 main_keyboard = ReplyKeyboardMarkup(
     [
         [KeyboardButton("🎯 تخمین رتبه کنکور سراسری")],
@@ -269,7 +260,6 @@ school_keyboard = ReplyKeyboardMarkup(
 )
 
 
-# ==================== HELPERS ====================
 async def typing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(
         chat_id=update.effective_chat.id,
@@ -300,7 +290,6 @@ async def send_photo_with_caption(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(caption, parse_mode=ParseMode.MARKDOWN)
 
 
-# ==================== START ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await typing(update, context)
@@ -321,7 +310,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 
-# ==================== MAIN MENU ====================
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
@@ -425,9 +413,6 @@ async def rank_tools_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return RANK_MENU
 
 
-# ============================================================
-# 1) تخمین رتبه با تراز کل
-# ============================================================
 async def rank_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if "تجربی" in text:
@@ -488,9 +473,6 @@ async def rank_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 
-# ============================================================
-# 2) تخمین تراز از معدل
-# ============================================================
 async def gpa_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if "تجربی" in text:
@@ -640,9 +622,6 @@ async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 
-# ============================================================
-# 3) تخمین رتبه از درصد + معدل
-# ============================================================
 async def pct_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if "تجربی" in text:
@@ -768,9 +747,6 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return MAIN_MENU
 
 
-# ============================================================
-# 4) تخمین از آزمون آزمایشی
-# ============================================================
 async def exam_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
@@ -815,9 +791,6 @@ async def exam_taraz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 
-# ============================================================
-# 5) درباره آکادمی الف
-# ============================================================
 async def academy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
@@ -842,9 +815,6 @@ async def academy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ACADEMY_MENU
 
 
-# ============================================================
-# 6) مدرسه کنکور الف و پلن ۴+۳
-# ============================================================
 async def school_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
@@ -869,7 +839,6 @@ async def school_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SCHOOL_MENU
 
 
-# ==================== CANCEL ====================
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
@@ -879,7 +848,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ==================== COMMANDS ====================
 async def set_commands(application: Application):
     await application.bot.set_my_commands(
         [
@@ -889,7 +857,6 @@ async def set_commands(application: Application):
     )
 
 
-# ==================== MAIN ====================
 def main():
     if not TOKEN:
         print("❌ BOT_TOKEN پیدا نشد.")
@@ -911,24 +878,19 @@ def main():
         states={
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu)],
             RANK_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, rank_tools_menu)],
-            # Rank by taraz
             RANK_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, rank_field)],
             RANK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, rank_region)],
             RANK_SCORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, rank_score)],
-            # GPA → Taraz
             GPA_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, gpa_field)],
             GPA_MODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, gpa_mode)],
             GPA_TOTAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, gpa_total)],
             GPA_SINGLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, gpa_single)],
-            # Percent + GPA
             PCT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, pct_field)],
             PCT_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, pct_region)],
             PCT_GPA: [MessageHandler(filters.TEXT & ~filters.COMMAND, pct_gpa)],
             PCT_SUBJECTS_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, pct_subjects_input)],
-            # Exam
             EXAM_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, exam_type)],
             EXAM_TARAZ: [MessageHandler(filters.TEXT & ~filters.COMMAND, exam_taraz)],
-            # Academy and school
             ACADEMY_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, academy_menu)],
             SCHOOL_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, school_menu)],
         },
