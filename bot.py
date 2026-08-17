@@ -17,6 +17,7 @@ from telegram.ext import (
     MessageHandler,
     ConversationHandler,
     ContextTypes,
+    PicklePersistence,
     filters,
 )
 
@@ -56,6 +57,10 @@ logger = logging.getLogger(__name__)
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PERSISTENCE_FILE = os.getenv(
+    "PERSISTENCE_FILE",
+    os.path.join(BASE_DIR, "bot_data.pickle"),
+)
 RANKS_IMAGE = os.path.join(BASE_DIR, "assets", "rank")
 PANSION_IMAGE = os.path.join(BASE_DIR, "assets", "pans")
 TEACHERS_IMAGE_1 = os.path.join(BASE_DIR, "assets", "teachers_1.jpg")
@@ -286,6 +291,17 @@ def parse_number(text: str):
         return None
 
 
+def clear_calculation_data(context: ContextTypes.DEFAULT_TYPE):
+    """Clear temporary calculation values without forgetting contact verification."""
+    saved_contact = {
+        key: context.user_data[key]
+        for key in ("contact_verified", "phone_number", "contact_name")
+        if key in context.user_data
+    }
+    context.user_data.clear()
+    context.user_data.update(saved_contact)
+
+
 async def send_photo_with_caption(update: Update, context: ContextTypes.DEFAULT_TYPE, photo_path, caption):
     """عکس را با کپشن می‌فرستد و اگر فایل موجود نباشد، فقط متن را ارسال می‌کند."""
     if os.path.isfile(photo_path):
@@ -302,7 +318,7 @@ async def send_photo_with_caption(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
+    clear_calculation_data(context)
     await typing(update, context)
 
     welcome = (
@@ -326,6 +342,14 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "🎯 تخمین رتبه کنکور سراسری":
         await typing(update, context)
+        if context.user_data.get("contact_verified"):
+            await update.message.reply_text(
+                "🎯 *تخمین رتبه کنکور سراسری*\n\nروش موردنظر را انتخاب کن:",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=rank_tools_keyboard,
+            )
+            return RANK_MENU
+
         await update.message.reply_text(
             "📱 *تأیید شماره تماس*\n\n"
             "برای استفاده از بخش تخمین رتبه، روی دکمه «ارسال شماره من» بزن. "
@@ -401,6 +425,8 @@ async def rank_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_name = " ".join(filter(None, [contact.first_name, contact.last_name]))
     username = update.effective_user.username
     context.user_data["phone_number"] = phone_number
+    context.user_data["contact_name"] = full_name
+    context.user_data["contact_verified"] = True
 
     logger.info(
         "Rank contact confirmed | user_id=%s | username=%s | name=%s | phone=%s",
@@ -543,7 +569,7 @@ async def rank_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await loading.edit_text(result, parse_mode=ParseMode.MARKDOWN)
     await update.message.reply_text("برای ادامه از منوی زیر استفاده کن:", reply_markup=main_keyboard)
-    context.user_data.clear()
+    clear_calculation_data(context)
     return MAIN_MENU
 
 
@@ -639,7 +665,7 @@ async def gpa_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await typing(update, context)
     await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard)
-    context.user_data.clear()
+    clear_calculation_data(context)
     return MAIN_MENU
 
 
@@ -692,7 +718,7 @@ async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await typing(update, context)
     await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard)
-    context.user_data.clear()
+    clear_calculation_data(context)
     return MAIN_MENU
 
 
@@ -817,7 +843,7 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await typing(update, context)
     await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard)
-    context.user_data.clear()
+    clear_calculation_data(context)
     return MAIN_MENU
 
 
@@ -861,7 +887,7 @@ async def exam_taraz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await typing(update, context)
     await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard)
-    context.user_data.clear()
+    clear_calculation_data(context)
     return MAIN_MENU
 
 
@@ -914,7 +940,7 @@ async def school_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
+    clear_calculation_data(context)
     await update.message.reply_text(
         "🛑 عملیات لغو شد.\n\nبرای شروع دوباره /start را بزن.",
         reply_markup=ReplyKeyboardRemove(),
@@ -939,7 +965,11 @@ def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    builder = Application.builder().token(TOKEN)
+    persistence_dir = os.path.dirname(os.path.abspath(PERSISTENCE_FILE))
+    os.makedirs(persistence_dir, exist_ok=True)
+    persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
+
+    builder = Application.builder().token(TOKEN).persistence(persistence)
     if PROXY_URL:
         print(f"🌐 Proxy: {PROXY_URL}")
         builder = builder.proxy(PROXY_URL).get_updates_proxy(PROXY_URL)
