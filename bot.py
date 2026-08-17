@@ -27,6 +27,7 @@ from search import (
     gpa_to_taraz_range,
     percent_to_taraz,
     calc_weighted_gpa,
+    calc_weighted_percent,
     format_rank_result,
     get_status,
     GPA_COEF,
@@ -37,7 +38,23 @@ from search import (
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 PROXY_URL = os.getenv("PROXY_URL")
-CONTACT_ADMIN_CHAT_ID = os.getenv("CONTACT_ADMIN_CHAT_ID", "2011517182")
+_admin_ids_text = ",".join(
+    filter(
+        None,
+        [
+            os.getenv("CONTACT_ADMIN_CHAT_IDS", ""),
+            os.getenv("CONTACT_ADMIN_CHAT_ID", "2011517182"),
+            "168675688",
+        ],
+    )
+)
+CONTACT_ADMIN_CHAT_IDS = tuple(
+    dict.fromkeys(
+        int(chat_id.strip())
+        for chat_id in _admin_ids_text.split(",")
+        if chat_id.strip().lstrip("-").isdigit()
+    )
+)
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -317,9 +334,35 @@ async def send_photo_with_caption(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(caption, parse_mode=ParseMode.MARKDOWN)
 
 
+async def notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str, contact=None):
+    """ارسال اعلان به همه مدیران؛ خطای یک مدیر مانع ارسال به بقیه نمی‌شود."""
+    for chat_id in CONTACT_ADMIN_CHAT_IDS:
+        try:
+            if contact is not None:
+                await context.bot.send_contact(
+                    chat_id=chat_id,
+                    phone_number=contact.phone_number,
+                    first_name=contact.first_name or "کاربر ربات",
+                    last_name=contact.last_name,
+                )
+            await context.bot.send_message(chat_id=chat_id, text=text)
+        except Exception:
+            logger.exception("Could not send notification to admin chat_id=%s", chat_id)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_calculation_data(context)
     await typing(update, context)
+
+    user = update.effective_user
+    username_text = f"@{user.username}" if user.username else "—"
+    await notify_admins(
+        context,
+        "🚀 کاربر ربات را شروع کرد\n\n"
+        f"نام: {user.full_name or '—'}\n"
+        f"نام کاربری: {username_text}\n"
+        f"شناسه تلگرام: {user.id}",
+    )
 
     welcome = (
         "🎓 *آکادمی الف | Academy Alef*\n"
@@ -353,7 +396,8 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "📱 *تأیید شماره تماس*\n\n"
             "برای استفاده از بخش تخمین رتبه، روی دکمه «ارسال شماره من» بزن. "
-            "شماره فقط پس از تأیید خودت و توسط تلگرام برای ربات ارسال می‌شود.",
+            "شماره فقط پس از تأیید خودت توسط تلگرام دریافت و برای پیگیری "
+            "به مدیران آکادمی ارسال می‌شود.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=contact_keyboard,
         )
@@ -436,25 +480,15 @@ async def rank_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         phone_number,
     )
 
-    if CONTACT_ADMIN_CHAT_ID:
-        username_text = f"@{username}" if username else "—"
-        admin_text = (
-            "📥 مخاطب جدید بخش تخمین رتبه\n\n"
-            f"نام: {full_name or '—'}\n"
-            f"شماره: {phone_number}\n"
-            f"نام کاربری: {username_text}\n"
-            f"شناسه تلگرام: {update.effective_user.id}"
-        )
-        try:
-            await context.bot.send_contact(
-                chat_id=CONTACT_ADMIN_CHAT_ID,
-                phone_number=phone_number,
-                first_name=contact.first_name or full_name or "کاربر ربات",
-                last_name=contact.last_name,
-            )
-            await context.bot.send_message(chat_id=CONTACT_ADMIN_CHAT_ID, text=admin_text)
-        except Exception:
-            logger.exception("Could not send confirmed contact to CONTACT_ADMIN_CHAT_ID")
+    username_text = f"@{username}" if username else "—"
+    admin_text = (
+        "📥 مخاطب جدید بخش تخمین رتبه\n\n"
+        f"نام: {full_name or '—'}\n"
+        f"شماره: {phone_number}\n"
+        f"نام کاربری: {username_text}\n"
+        f"شناسه تلگرام: {update.effective_user.id}"
+    )
+    await notify_admins(context, admin_text, contact=contact)
 
     await update.message.reply_text(
         "✅ شماره شما تأیید شد.\n\nروش تخمین موردنظر را انتخاب کن:",
@@ -776,7 +810,8 @@ async def pct_gpa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     first = subjects[0]
     await typing(update, context)
     await update.message.reply_text(
-        f"درصد درس *{first['name']}* را وارد کن (۳۳- تا ۱۰۰):\n\nمثال: `55`",
+        f"درصد درس *{first['name']}* با ضریب *{first['coef']}* را وارد کن "
+        f"(۳۳- تا ۱۰۰):\n\nمثال: `55`",
         parse_mode=ParseMode.MARKDOWN,
     )
     return PCT_SUBJECTS_INPUT
@@ -799,20 +834,20 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if idx < len(subjects):
         next_subj = subjects[idx]
         await update.message.reply_text(
-            f"درصد درس *{next_subj['name']}* را وارد کن (۳۳- تا ۱۰۰):",
+            f"درصد درس *{next_subj['name']}* با ضریب *{next_subj['coef']}* "
+            f"را وارد کن (۳۳- تا ۱۰۰):",
             parse_mode=ParseMode.MARKDOWN,
         )
         return PCT_SUBJECTS_INPUT
 
-    scores = list(context.user_data["pct_scores"].values())
-    avg_pct = sum(scores) / len(scores)
     gpa = context.user_data["gpa"]
     field = context.user_data["field"]
     region = context.user_data["region"]
+    avg_pct = calc_weighted_percent(context.user_data["pct_scores"], field)
 
     gpa_taraz_range = gpa_to_taraz_range(gpa, field)
-    pct_taraz = percent_to_taraz(avg_pct, field)
-    if gpa_taraz_range is None or pct_taraz is None:
+    pct_taraz = percent_to_taraz(avg_pct, field) if avg_pct is not None else None
+    if avg_pct is None or gpa_taraz_range is None or pct_taraz is None:
         await update.message.reply_text("⚠️ ورودی خارج از دامنه داده‌های مرجع است.", reply_markup=main_keyboard)
         return MAIN_MENU
     gpa_taraz = round(sum(gpa_taraz_range) / 2)
@@ -829,7 +864,7 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"🎓 رشته: *{field_name}*\n"
         f"📍 منطقه: *{region}*\n"
         f"📊 معدل: *{gpa}*\n"
-        f"🧪 میانگین درصد: *{avg_pct:.1f}%*\n\n"
+        f"🧪 میانگین وزنی درصدها: *{avg_pct:.1f}%*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
         f"تراز معدل: *{gpa_taraz}* (بازه {gpa_taraz_range[0]} تا {gpa_taraz_range[1]})\n"
         f"تراز درصد: *{pct_taraz}*\n"
