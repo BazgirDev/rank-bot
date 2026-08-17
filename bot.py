@@ -36,6 +36,7 @@ from search import (
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 PROXY_URL = os.getenv("PROXY_URL")
+CONTACT_ADMIN_CHAT_ID = os.getenv("CONTACT_ADMIN_CHAT_ID", "2011517182")
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -50,7 +51,8 @@ logger = logging.getLogger(__name__)
     PCT_FIELD, PCT_REGION, PCT_GPA, PCT_SUBJECTS_INPUT,
     EXAM_TYPE, EXAM_TARAZ,
     RANK_MENU, ACADEMY_MENU, SCHOOL_MENU,
-) = range(17)
+    RANK_CONTACT,
+) = range(18)
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -259,6 +261,15 @@ school_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
+contact_keyboard = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("📱 ارسال شماره من", request_contact=True)],
+        [KeyboardButton("🔙 بازگشت به منوی اصلی")],
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=True,
+)
+
 
 async def typing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(
@@ -316,11 +327,13 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🎯 تخمین رتبه کنکور سراسری":
         await typing(update, context)
         await update.message.reply_text(
-            "🎯 *تخمین رتبه کنکور سراسری*\n\nروش موردنظر را انتخاب کنید:",
+            "📱 *تأیید شماره تماس*\n\n"
+            "برای استفاده از بخش تخمین رتبه، روی دکمه «ارسال شماره من» بزن. "
+            "شماره فقط پس از تأیید خودت و توسط تلگرام برای ربات ارسال می‌شود.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=rank_tools_keyboard,
+            reply_markup=contact_keyboard,
         )
-        return RANK_MENU
+        return RANK_CONTACT
 
     elif text == "🏛 درباره آکادمی الف":
         await typing(update, context)
@@ -361,6 +374,67 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=main_keyboard,
         )
         return MAIN_MENU
+
+
+async def rank_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Accept only the current user's Telegram contact before opening rank tools."""
+    if update.message.text == "🔙 بازگشت به منوی اصلی":
+        await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=main_keyboard)
+        return MAIN_MENU
+
+    contact = update.message.contact
+    if contact is None:
+        await update.message.reply_text(
+            "لطفاً شماره خودت را فقط با دکمه «📱 ارسال شماره من» تأیید کن.",
+            reply_markup=contact_keyboard,
+        )
+        return RANK_CONTACT
+
+    if contact.user_id != update.effective_user.id:
+        await update.message.reply_text(
+            "⚠️ این شماره متعلق به حساب تلگرام شما نیست. لطفاً شماره خودت را با دکمه زیر ارسال کن.",
+            reply_markup=contact_keyboard,
+        )
+        return RANK_CONTACT
+
+    phone_number = contact.phone_number
+    full_name = " ".join(filter(None, [contact.first_name, contact.last_name]))
+    username = update.effective_user.username
+    context.user_data["phone_number"] = phone_number
+
+    logger.info(
+        "Rank contact confirmed | user_id=%s | username=%s | name=%s | phone=%s",
+        update.effective_user.id,
+        username or "-",
+        full_name or "-",
+        phone_number,
+    )
+
+    if CONTACT_ADMIN_CHAT_ID:
+        username_text = f"@{username}" if username else "—"
+        admin_text = (
+            "📥 مخاطب جدید بخش تخمین رتبه\n\n"
+            f"نام: {full_name or '—'}\n"
+            f"شماره: {phone_number}\n"
+            f"نام کاربری: {username_text}\n"
+            f"شناسه تلگرام: {update.effective_user.id}"
+        )
+        try:
+            await context.bot.send_contact(
+                chat_id=CONTACT_ADMIN_CHAT_ID,
+                phone_number=phone_number,
+                first_name=contact.first_name or full_name or "کاربر ربات",
+                last_name=contact.last_name,
+            )
+            await context.bot.send_message(chat_id=CONTACT_ADMIN_CHAT_ID, text=admin_text)
+        except Exception:
+            logger.exception("Could not send confirmed contact to CONTACT_ADMIN_CHAT_ID")
+
+    await update.message.reply_text(
+        "✅ شماره شما تأیید شد.\n\nروش تخمین موردنظر را انتخاب کن:",
+        reply_markup=rank_tools_keyboard,
+    )
+    return RANK_MENU
 
 
 async def rank_tools_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -877,6 +951,9 @@ def main():
         entry_points=[CommandHandler("start", start)],
         states={
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu)],
+            RANK_CONTACT: [
+                MessageHandler(filters.CONTACT | (filters.TEXT & ~filters.COMMAND), rank_contact)
+            ],
             RANK_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, rank_tools_menu)],
             RANK_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, rank_field)],
             RANK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, rank_region)],
