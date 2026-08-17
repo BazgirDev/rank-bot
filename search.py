@@ -80,8 +80,18 @@ GPA_COEF = {
 }
 
 PCT_SUBJECTS = {
-    "tajrobi": [{"id": "riazi", "name": "ریاضی"}, {"id": "zist", "name": "زیست‌شناسی"}, {"id": "zamin", "name": "زمین‌شناسی"}, {"id": "physic", "name": "فیزیک"}, {"id": "shimi", "name": "شیمی"}],
-    "riazi": [{"id": "riaziat", "name": "ریاضیات"}, {"id": "shimi", "name": "شیمی"}, {"id": "physic", "name": "فیزیک"}],
+    "tajrobi": [
+        {"id": "riazi", "name": "ریاضی", "coef": 7},
+        {"id": "zist", "name": "زیست‌شناسی", "coef": 12},
+        {"id": "zamin", "name": "زمین‌شناسی", "coef": 1},
+        {"id": "physic", "name": "فیزیک", "coef": 7},
+        {"id": "shimi", "name": "شیمی", "coef": 9},
+    ],
+    "riazi": [
+        {"id": "riaziat", "name": "ریاضیات", "coef": 12},
+        {"id": "shimi", "name": "شیمی", "coef": 6},
+        {"id": "physic", "name": "فیزیک", "coef": 9},
+    ],
     "ensani": [
         {"id": "riazi", "name": "ریاضی"}, {"id": "eghtesad", "name": "اقتصاد"},
         {"id": "farsi", "name": "زبان و ادبیات فارسی"}, {"id": "arabi", "name": "عربی"},
@@ -174,6 +184,26 @@ def calc_weighted_gpa(scores: dict, field: str) -> float | None:
         if val is not None and 10 <= val <= 20:
             total += val * item["coef"]
             coef_sum += item["coef"]
+    return total / coef_sum if coef_sum else None
+
+
+def calc_weighted_percent(scores: dict, field: str) -> float | None:
+    """محاسبه میانگین وزنی درصدهای کنکور با ضرایب اختصاصی هر رشته."""
+    subjects = PCT_SUBJECTS.get(field, [])
+    if not subjects:
+        return None
+
+    total = coef_sum = 0.0
+    for subject in subjects:
+        value = scores.get(subject["id"])
+        if value is None or not -33 <= value <= 100:
+            return None
+        coef = subject.get("coef")
+        if coef is None:
+            return None
+        total += value * coef
+        coef_sum += coef
+
     return total / coef_sum if coef_sum else None
 
 
