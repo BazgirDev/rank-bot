@@ -38,23 +38,8 @@ from search import (
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 PROXY_URL = os.getenv("PROXY_URL")
-_admin_ids_text = ",".join(
-    filter(
-        None,
-        [
-            os.getenv("CONTACT_ADMIN_CHAT_IDS", ""),
-            os.getenv("CONTACT_ADMIN_CHAT_ID", "2011517182"),
-            "168675688",
-        ],
-    )
-)
-CONTACT_ADMIN_CHAT_IDS = tuple(
-    dict.fromkeys(
-        int(chat_id.strip())
-        for chat_id in _admin_ids_text.split(",")
-        if chat_id.strip().lstrip("-").isdigit()
-    )
-)
+# هر Contact تأییدشده دقیقاً برای این دو حساب مدیر ارسال می‌شود.
+CONTACT_ADMIN_CHAT_IDS = (2011517182, 168675688)
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -319,6 +304,32 @@ def clear_calculation_data(context: ContextTypes.DEFAULT_TYPE):
     context.user_data.update(saved_contact)
 
 
+async def show_result_or_request_contact(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: str,
+):
+    """نتیجه را فقط پس از دریافت یک‌باره Contact خود کاربر نمایش می‌دهد."""
+    if context.user_data.get("contact_verified"):
+        await typing(update, context)
+        await update.message.reply_text(
+            result,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=main_keyboard,
+        )
+        clear_calculation_data(context)
+        return MAIN_MENU
+
+    context.user_data["pending_result"] = result
+    await update.message.reply_text(
+        "✅ محاسبه انجام شد.\n\n"
+        "برای مشاهده نتیجه نهایی، رتبه یا تراز، فقط یک‌بار شماره خودت را "
+        "با دکمه زیر Share کن. شماره پس از تأیید برای مدیران آکادمی ارسال می‌شود.",
+        reply_markup=contact_keyboard,
+    )
+    return RANK_CONTACT
+
+
 async def send_photo_with_caption(update: Update, context: ContextTypes.DEFAULT_TYPE, photo_path, caption):
     """عکس را با کپشن می‌فرستد و اگر فایل موجود نباشد، فقط متن را ارسال می‌کند."""
     if os.path.isfile(photo_path):
@@ -334,20 +345,61 @@ async def send_photo_with_caption(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(caption, parse_mode=ParseMode.MARKDOWN)
 
 
-async def notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str, contact=None):
-    """ارسال اعلان به همه مدیران؛ خطای یک مدیر مانع ارسال به بقیه نمی‌شود."""
-    for chat_id in CONTACT_ADMIN_CHAT_IDS:
+async def send_with_retry(operation, description: str, attempts: int = 3) -> bool:
+    """اجرای درخواست تلگرام با تلاش مجدد برای خطاهای موقت."""
+    for attempt in range(1, attempts + 1):
         try:
-            if contact is not None:
-                await context.bot.send_contact(
-                    chat_id=chat_id,
-                    phone_number=contact.phone_number,
-                    first_name=contact.first_name or "کاربر ربات",
-                    last_name=contact.last_name,
-                )
-            await context.bot.send_message(chat_id=chat_id, text=text)
-        except Exception:
-            logger.exception("Could not send notification to admin chat_id=%s", chat_id)
+            await operation()
+            return True
+        except Exception as exc:
+            logger.warning(
+                "%s failed (attempt %s/%s): %s",
+                description,
+                attempt,
+                attempts,
+                exc,
+            )
+            if attempt < attempts:
+                await asyncio.sleep(attempt)
+    return False
+
+
+async def notify_one_admin(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    text: str,
+    contact=None,
+) -> tuple[bool, bool]:
+    """کارت Contact و متن شماره را مستقل می‌فرستد تا هیچ سرنخی از دست نرود."""
+    contact_sent = True
+    if contact is not None:
+        contact_sent = await send_with_retry(
+            lambda: context.bot.send_contact(
+                chat_id=chat_id,
+                phone_number=contact.phone_number,
+                first_name=contact.first_name or "کاربر ربات",
+                last_name=contact.last_name,
+            ),
+            f"send_contact to admin {chat_id}",
+        )
+
+    # حتی اگر ارسال کارت Contact شکست بخورد، شماره داخل این متن تحویل داده می‌شود.
+    text_sent = await send_with_retry(
+        lambda: context.bot.send_message(chat_id=chat_id, text=text),
+        f"send_message to admin {chat_id}",
+    )
+    return contact_sent, text_sent
+
+
+async def notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str, contact=None):
+    """ارسال هم‌زمان اعلان به همه مدیران و برگرداندن نتیجه هر مقصد."""
+    results = await asyncio.gather(
+        *(
+            notify_one_admin(context, chat_id, text, contact)
+            for chat_id in CONTACT_ADMIN_CHAT_IDS
+        )
+    )
+    return dict(zip(CONTACT_ADMIN_CHAT_IDS, results))
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -377,7 +429,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=main_keyboard,
     )
+    if user.id in CONTACT_ADMIN_CHAT_IDS:
+        await update.message.reply_text(
+            "✅ دسترسی دریافت مخاطبان برای این حساب مدیر فعال است.\n"
+            "برای تست کارت Contact دستور /admincheck را بفرست.",
+        )
     return MAIN_MENU
+
+
+async def admin_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """بررسی عملی دسترسی ارسال کارت Contact برای حساب مدیر فعلی."""
+    user = update.effective_user
+    if user.id not in CONTACT_ADMIN_CHAT_IDS:
+        await update.message.reply_text("⛔️ این دستور فقط برای مدیران ربات فعال است.")
+        return
+
+    contact_sent = await send_with_retry(
+        lambda: context.bot.send_contact(
+            chat_id=user.id,
+            phone_number="+989000000000",
+            first_name="TEST - Academy Alef",
+            last_name="Contact delivery check",
+        ),
+        f"admin contact self-check {user.id}",
+    )
+    if contact_sent:
+        await update.message.reply_text(
+            "✅ تست موفق بود؛ این حساب می‌تواند Contactهای کاربران را دریافت کند."
+        )
+    else:
+        await update.message.reply_text(
+            "❌ تست Contact ناموفق بود. لاگ سرویس را برای خطای Telegram بررسی کنید."
+        )
 
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -385,23 +468,12 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "🎯 تخمین رتبه کنکور سراسری":
         await typing(update, context)
-        if context.user_data.get("contact_verified"):
-            await update.message.reply_text(
-                "🎯 *تخمین رتبه کنکور سراسری*\n\nروش موردنظر را انتخاب کن:",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=rank_tools_keyboard,
-            )
-            return RANK_MENU
-
         await update.message.reply_text(
-            "📱 *تأیید شماره تماس*\n\n"
-            "برای استفاده از بخش تخمین رتبه، روی دکمه «ارسال شماره من» بزن. "
-            "شماره فقط پس از تأیید خودت توسط تلگرام دریافت و برای پیگیری "
-            "به مدیران آکادمی ارسال می‌شود.",
+            "🎯 *تخمین رتبه کنکور سراسری*\n\nروش موردنظر را انتخاب کن:",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=contact_keyboard,
+            reply_markup=rank_tools_keyboard,
         )
-        return RANK_CONTACT
+        return RANK_MENU
 
     elif text == "🏛 درباره آکادمی الف":
         await typing(update, context)
@@ -445,8 +517,9 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def rank_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Accept only the current user's Telegram contact before opening rank tools."""
+    """دریافت یک‌باره Contact و نمایش نتیجه‌ای که تا زمان تأیید مخفی مانده است."""
     if update.message.text == "🔙 بازگشت به منوی اصلی":
+        context.user_data.pop("pending_result", None)
         await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=main_keyboard)
         return MAIN_MENU
 
@@ -488,13 +561,35 @@ async def rank_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"نام کاربری: {username_text}\n"
         f"شناسه تلگرام: {update.effective_user.id}"
     )
-    await notify_admins(context, admin_text, contact=contact)
+    delivery_results = await notify_admins(context, admin_text, contact=contact)
+    failed_admins = [
+        chat_id
+        for chat_id, (contact_sent, text_sent) in delivery_results.items()
+        if not contact_sent and not text_sent
+    ]
+    if failed_admins:
+        logger.error("Contact delivery completely failed for admins: %s", failed_admins)
+
+    pending_result = context.user_data.pop("pending_result", None)
+    if pending_result:
+        await update.message.reply_text(
+            "✅ شماره شما تأیید شد. نتیجه محاسبه:",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await update.message.reply_text(
+            pending_result,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=main_keyboard,
+        )
+        clear_calculation_data(context)
+        return MAIN_MENU
 
     await update.message.reply_text(
-        "✅ شماره شما تأیید شد.\n\nروش تخمین موردنظر را انتخاب کن:",
-        reply_markup=rank_tools_keyboard,
+        "✅ شماره شما تأیید شد. از این به بعد دوباره درخواست نمی‌شود.",
+        reply_markup=main_keyboard,
     )
-    return RANK_MENU
+    clear_calculation_data(context)
+    return MAIN_MENU
 
 
 async def rank_tools_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -601,10 +696,8 @@ async def rank_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rank = find_rank(field, region, score)
     result = format_rank_result(field, region, score, rank)
 
-    await loading.edit_text(result, parse_mode=ParseMode.MARKDOWN)
-    await update.message.reply_text("برای ادامه از منوی زیر استفاده کن:", reply_markup=main_keyboard)
-    clear_calculation_data(context)
-    return MAIN_MENU
+    await loading.edit_text("✅ محاسبه با موفقیت انجام شد.")
+    return await show_result_or_request_contact(update, context, result)
 
 
 async def gpa_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -697,10 +790,7 @@ async def gpa_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💡 این تب فقط تراز می‌دهد و رتبه محاسبه نمی‌شود."
     )
 
-    await typing(update, context)
-    await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard)
-    clear_calculation_data(context)
-    return MAIN_MENU
+    return await show_result_or_request_contact(update, context, result)
 
 
 async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -750,10 +840,7 @@ async def gpa_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💡 این تب فقط تراز می‌دهد و رتبه محاسبه نمی‌شود."
     )
 
-    await typing(update, context)
-    await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard)
-    clear_calculation_data(context)
-    return MAIN_MENU
+    return await show_result_or_request_contact(update, context, result)
 
 
 async def pct_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -876,10 +963,7 @@ async def pct_subjects_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"💡 نتیجه فقط از جدول‌های داده‌شده محاسبه شده است."
     )
 
-    await typing(update, context)
-    await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard)
-    clear_calculation_data(context)
-    return MAIN_MENU
+    return await show_result_or_request_contact(update, context, result)
 
 
 async def exam_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -920,10 +1004,7 @@ async def exam_taraz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     exam_type_val = context.user_data.get("exam_type")
     result = evaluate_exam_taraz(exam_type_val, taraz)
 
-    await typing(update, context)
-    await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard)
-    clear_calculation_data(context)
-    return MAIN_MENU
+    return await show_result_or_request_contact(update, context, result)
 
 
 async def academy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1041,6 +1122,7 @@ def main():
     )
 
     app.add_handler(conv)
+    app.add_handler(CommandHandler("admincheck", admin_check))
     app.add_handler(CommandHandler("cancel", cancel))
 
     print("=" * 45)
